@@ -1,0 +1,15 @@
+name = "day3"
+version = "0.1.0"
+defaultTargets = ["day3"]
+
+[[require]]
+name = "Regex"
+git = "https://github.com/bergmannjg/regex"
+branch = "main"
+
+[[lean_lib]]
+name = "Day3"
+
+[[lean_exe]]
+name = "day3"
+root = "Main"
