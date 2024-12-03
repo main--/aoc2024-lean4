@@ -11,7 +11,7 @@ def parseInput (s: String): List (List Nat) :=
 
 def iterPairwise (l: List α): List (α × α) := (l.drop 1).zip l
 
-def safeLevels (l: List Nat): Bool := (iterPairwise l).all (fun (a, b) => a ≠ b ∧ ((Int.sub ↑a ↑b).natAbs ≤ 2))
+def safeLevels (l: List Nat): Bool := ((iterPairwise l).all (fun (a, b) => a > b ∧ ((a - b) ≤ 3))) ∨ ((iterPairwise l).all (fun (a, b) => (a < b) ∧ ((b - a) ≤ 3)))
 
 def aoc2_1 (l: List (List Nat)): Nat :=
   l.countP safeLevels
