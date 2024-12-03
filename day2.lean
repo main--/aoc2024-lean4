@@ -12,8 +12,12 @@ def parseInput (s: String): List (List Nat) :=
 def iterPairwise (l: List α): List (α × α) := (l.drop 1).zip l
 
 def safeLevels (l: List Nat): Bool := ((iterPairwise l).all (fun (a, b) => a > b ∧ ((a - b) ≤ 3))) ∨ ((iterPairwise l).all (fun (a, b) => (a < b) ∧ ((b - a) ≤ 3)))
+example: safeLevels [1, 3, 2, 4, 5] = False := by rw [safeLevels, iterPairwise]; simp
 
-def aoc2_1 (l: List (List Nat)): Nat :=
-  l.countP safeLevels
+def safeLevels2 (l: List Nat): Bool := ((List.range l.length).map (fun i => l.eraseIdx i)).any (safeLevels ·)
+
+def aoc2_1 (l: List (List Nat)): Nat := l.countP safeLevels
+def aoc2_2 (l: List (List Nat)): Nat := l.countP safeLevels2
 
 #eval aoc2_1 (parseInput input)
+#eval aoc2_2 (parseInput input)
