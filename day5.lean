@@ -212,7 +212,14 @@ theorem validateRule_neg (hbc1 : b ≠ c1): (validateRule (a, b) { l:= [c1, b, c
 
 theorem middleIndexValid (xs: List α) (nonempty : xs.length > 0) : List.length xs / 2 < List.length xs := Nat.div_lt_self nonempty (by simp)
 def validateRules (r: List Rule) (p: Pages): Bool := r.all (validateRule · p)
-def aoc5_1 (r: List Rule) (p: List Pages): Nat :=
-  List.sum ((p.filter (validateRules r ·)).map (fun ps => ps.l[ps.l.length / 2]'(Nat.div_lt_self ps.nonempty (by simp))))
 
-#eval (aoc5_1.uncurry (parseInput data))
+def sumMiddleNums (p: List Pages): Nat :=
+  List.sum (p.map (fun ps => ps.l[ps.l.length / 2]'(Nat.div_lt_self ps.nonempty (by simp))))
+def aoc5_1 (r: List Rule) (p: List Pages): Nat := sumMiddleNums (p.filter (validateRules r ·))
+#eval aoc5_1.uncurry (parseInput data)
+
+def fixRules (r: List Rule) (p: Pages): Pages :=
+  { l := p.l.mergeSort (fun x y => r.contains (x, y) ∧ ¬r.contains (y, x)), nonempty := by rw [List.length_mergeSort]; exact p.nonempty }
+
+def aoc5_2 (r: List Rule) (p: List Pages): Nat := sumMiddleNums ((p.filter (¬validateRules r ·)).map (fixRules r ·))
+#eval aoc5_2.uncurry (parseInput data)
