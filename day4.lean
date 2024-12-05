@@ -30,8 +30,28 @@ def aoc4_1 (m: Matrix): Nat := (iterateAllCandidates m).count "XMAS"
 #eval aoc4_1 (parseInput data)
 
 
+def Matrix.getChar (m: Matrix) (x: Nat) (y: Nat): Char := ((m.get? x).bind (fun r => r.get? y)).getD ' '
 
+def isX_MAS (m: Matrix) (x: Nat) (y: Nat): Bool :=
+  (x ≥ 1) ∧ (y ≥ 1) ∧ (m.getChar x y = 'A')
+  ∧ ([m.getChar (x-1) (y-1), m.getChar (x+1) (y+1)].mergeSort = ['M', 'S'])
+  ∧ ([m.getChar (x-1) (y+1), m.getChar (x+1) (y-1)].mergeSort = ['M', 'S'])
+example: isX_MAS [['M', ' ', 'M'], [' ', 'A', ' '], ['S', ' ', 'S']] 1 1 = True := by rw [isX_MAS, Matrix.getChar, Matrix.getChar, Matrix.getChar, Matrix.getChar, Matrix.getChar]; simp; rw [List.mergeSort_of_sorted]; simp
+example: isX_MAS [['M', ' ', 'M'], [' ', 'A', ' '], ['S', ' ', 'S']] 0 1 = False := by rw [isX_MAS, Matrix.getChar, Matrix.getChar, Matrix.getChar, Matrix.getChar, Matrix.getChar]; simp
+example: isX_MAS [['M', ' ', 'M'], [' ', 'A', ' '], ['S', ' ', 'S']] 2 1 = False := by rw [isX_MAS, Matrix.getChar, Matrix.getChar, Matrix.getChar, Matrix.getChar, Matrix.getChar]; simp
+example: isX_MAS [['M', ' ', 'M'], [' ', 'A', ' '], ['Y', ' ', 'S']] 1 1 = False := by
+  rw [isX_MAS, Matrix.getChar, Matrix.getChar, Matrix.getChar, Matrix.getChar, Matrix.getChar]
+  simp
+  rw [List.mergeSort_of_sorted, List.mergeSort_of_sorted]
+  simp
+  simp
+  simp
 
+def count_x_mas (m: Matrix) :=
+  let coords := m.enum.flatMap (fun (i, x) => (List.range x.length).map (fun j => (i, j)))
+  coords.countP (fun (x, y) => isX_MAS m x y)
+
+#eval count_x_mas (parseInput data)
 /-
 failed experiment
 
