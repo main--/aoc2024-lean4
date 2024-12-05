@@ -183,10 +183,6 @@ def parseInput (s: String): ((List Rule) × (List Pages)) :=
   )
   (rules, pages)
 
-inductive RuleScanState where
-  | begin
-  | hasFst 
-
 def validateRule (r: Rule) (p: Pages): Bool := ¬ ((p.l.dropWhile (· ≠ r.snd)).contains r.fst)
 example: validateRule (47, 53) { l := [75,47,61,53,29], nonempty := (by simp) } = True := by rw [validateRule]; simp
 example: validateRule (97, 75) { l := [75,97,47,61,53], nonempty := (by simp) } = False := by rw [validateRule]; simp
