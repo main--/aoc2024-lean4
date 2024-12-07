@@ -1,0 +1,12 @@
+name = "day6"
+version = "0.1.0"
+keywords = ["math"]
+defaultTargets = ["day6"]
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+
+[[lean_exe]]
+name = "day6"
+root = "Main"

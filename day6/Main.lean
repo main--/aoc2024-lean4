@@ -53,7 +53,8 @@ def exampleInput := "....#.....
 #.........
 ......#..."
 
-#guard (parseInput exampleInput).isSome
+def exampleMap := parseInput exampleInput
+#guard exampleMap.isSome
 
 inductive Orientation where
 | up
@@ -67,7 +68,7 @@ abbrev Coords (m: Map) := Fin m.height × Fin m.width
 def enumFin (l: Vector α n): List (Fin l.size × α) := (List.finRange l.size).zip l.toList
 
 def findStart (m: Map): Option (Coords m × Orientation) :=
-  let res := (enumFin m.map).findSome? (fun (i, row) => 
+  let res := (enumFin m.map).findSome? (fun (i, row) =>
     let caretPos := row.indexOf? '^'
     caretPos.map (Fin.cast m.map.size_toArray i, ·)
   )
@@ -125,9 +126,8 @@ def Coords.next (c: Coords m) (o: Orientation): Option (Coords m) :=
   else none
 
 abbrev Visited (map: Map) := Vector Bool (map.width * map.height)
-def Visited.markVisited (v: Visited map) (c: Coords map): Visited map :=
-  let (x, y) := c
-  v.set (x * map.width + y) true (by
+theorem Visited.validIndex (map: Map) (x: Fin map.height) (y: Fin map.width): (x * map.width + y) < (map.width * map.height) :=
+  by
     have nontrivialh: 1 ≤ map.height := by
       by_cases sw: 1 ≤ map.height
       . exact sw
@@ -147,13 +147,17 @@ def Visited.markVisited (v: Visited map) (c: Coords map): Visited map :=
       simp
     . refine Nat.succ_le_of_lt ?_
       simp
-  )
+def Visited.markVisited (v: Visited map) (c: Coords map): Visited map :=
+  let (x, y) := c
+  v.set (x * map.width + y) true (Visited.validIndex map x y)
+def Visited.isVisited (v: Visited map) (c: Coords map): Bool :=
+  let (x, y) := c
+  v.get (Fin.mk (x * map.width + y) (Visited.validIndex map x y))
 def Visited.count (v: Visited map): Nat := (v.toList.filter (·)).count true
 def Visited.mk: Visited map := Vector.mkVector (map.width * map.height) false
 
 inductive WalkOutcome (map: Map) where
 | exited (visited: Visited map)
-| loop
 | needTurn (visited: Visited map) (pos: Coords map)
 
 def Orientation.turnRight: Orientation -> Orientation
@@ -235,7 +239,7 @@ theorem MaxFinList (l: List (Fin n)) (hnd: List.Nodup l): l.length ≤ n := le_o
 instance : Fintype (Fin n × Fin m) := instFintypeProd (Fin n) (Fin m)
 
 instance Orientation.fintype : Fintype Orientation where
-  elems := ⟨{ Orientation.up, Orientation.down, Orientation.left, Orientation.right }, by simp⟩ 
+  elems := ⟨{ Orientation.up, Orientation.down, Orientation.left, Orientation.right }, by simp⟩
   complete := fun x => by cases x <;> simp
 
 theorem MaxTwoFinList (l: List (Fin n × Fin m)) (hnd: List.Nodup l): l.length ≤ n * m := le_of_le_of_eq (List.Nodup.length_le_card hnd) (by
@@ -251,7 +255,7 @@ theorem MaxTurningPoints (l: List (Coords map × Orientation)) (tpu: List.Nodup 
   simp [Fintype.card, Finset.univ, Fintype.elems]
 )
 
-def mainLoop (map: Map) (turningPoints: List (Coords map × Orientation)) (tpu: List.Nodup turningPoints) (visited: Visited map) (pos: Coords map) (or: Orientation): Option Nat :=
+def findVisitedPositions.loop (map: Map) (turningPoints: List (Coords map × Orientation)) (tpu: List.Nodup turningPoints) (visited: Visited map) (pos: Coords map) (or: Orientation): Option (Visited map) :=
   let turningPoint := (pos, or)
   if notcontains: turningPoints.contains turningPoint then
     none
@@ -263,18 +267,49 @@ def mainLoop (map: Map) (turningPoints: List (Coords map × Orientation)) (tpu: 
       exact notcontains
     )
     match walkUntilObstacle map visited pos or with
-    | WalkOutcome.loop => none
-    | WalkOutcome.exited v => some v.count
-    | WalkOutcome.needTurn v p => mainLoop map turningPoints tpu' v p or.turnRight
+    | WalkOutcome.exited v => some v
+    | WalkOutcome.needTurn v p => findVisitedPositions.loop map turningPoints tpu' v p or.turnRight
 termination_by (map.height * map.width * 4) - turningPoints.length
 decreasing_by
   apply Nat.sub_lt_sub_left
   . exact MaxTurningPoints turningPoints tpu'
   . simp
 
-def countVisited (map: Map): Option Nat :=
+def findVisitedPositions (map: Map): Option (Visited map) :=
   (findStart map).bind (fun (sp, so) =>
-    mainLoop map [] List.nodup_nil (Visited.mk.markVisited sp) sp so
+    findVisitedPositions.loop map [] List.nodup_nil (Visited.mk.markVisited sp) sp so
   )
 
-#eval (parseInput exampleInput).bind countVisited
+def countVisited (map: Map): Option Nat :=
+  (findVisitedPositions map).map Visited.count
+
+#guard some 41 = exampleMap.bind countVisited
+
+def putObstruction (map: Map) (c: Coords map): Map :=
+  let (x,y) := c
+  { map with map := map.map.set x ((map.map.get x).set y '#') }
+
+def allCoords (map: Map): List (Coords map) := (List.finRange map.height).product (List.finRange map.width)
+
+def Map.mayObstacle (map: Map) (c: Coords map): Bool := map.map[c.fst][c.snd] = '.'
+
+def part2 (map: Map): Option Nat :=
+  (findVisitedPositions map).map (fun visited =>
+    ((allCoords map).filter (fun c =>
+      (visited.isVisited c) ∧ (map.mayObstacle c) ∧ (findVisitedPositions (putObstruction map c)).isNone
+    )).length
+  )
+
+#guard some 6 = exampleMap.bind part2
+
+def main (args: List String) : IO Unit := do
+  let file ← IO.FS.readFile "input.txt"
+  match parseInput file with
+  | none => IO.println "Invalid input"
+  | some map =>
+    if args[0]? = "2" then
+      let result := part2 map
+      IO.println s!"Result: {result}"
+    else
+      let result := countVisited map
+      IO.println s!"Result: {result}"
