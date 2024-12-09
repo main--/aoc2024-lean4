@@ -17,11 +17,6 @@ def ArrayMap.iter [fea: FinEnum α] (map: ArrayMap α β): List (α × β) :=
 instance [fea: FinEnum α] [Hashable α] [Repr α] [Repr β] : Repr (ArrayMap α β) where
   reprPrec am := Std.HashMap.instRepr.reprPrec (Std.HashMap.ofList am.iter)
 
-structure CharRange (a: UInt8) (b: UInt8) where
-  c: UInt8
-  prop: a ≤ c ∧ c ≤ b
-deriving DecidableEq
-
 abbrev AntennaFrequency := { c: Char // c.isAlphanum }
 instance AntennaFrequency.finEnum: FinEnum AntennaFrequency :=
   FinEnum.ofList
