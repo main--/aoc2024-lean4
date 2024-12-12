@@ -196,7 +196,9 @@ def warshallAlgo {numVertex: Nat} (edges: List ((Fin numVertex) × (Fin numVerte
 -/
 --variable {numVertex: Nat}
 abbrev warshallAlgo.Conn (numVertex: Nat) := ArrayMap ((Fin numVertex) × (Fin numVertex)) Bool
-def innermost (numVertex: Nat) (k i j: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
+namespace testscope
+variable (numVertex: Nat)
+@[inline] def innermost (k i j: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
     let s1 := conn.get (i, k)
     let s2 := conn.get (k, j)
     --let set := (conn.get (i, k)) && (conn.get (k, j))
@@ -204,37 +206,18 @@ def innermost (numVertex: Nat) (k i j: Fin numVertex) (conn: warshallAlgo.Conn n
     if s1 && s2 then
       conn.set (i, j) true
     else conn
-def iterJ (numVertex: Nat) (k i j: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
-    --dbg_trace "iterJ {k} {i} {j}";
-    let conn := innermost numVertex k i j conn
-    if jval: j.val + 1 < numVertex then
-      iterJ numVertex k i ⟨j.val+1, jval⟩ conn
-    else conn
-def iterI (numVertex: Nat) (k i: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
-    --dbg_trace "iterI {k} {i}";
-    let conn := iterJ numVertex k i ⟨0, k.pos⟩ conn
-    if ival: i.val + 1 < numVertex then
-      iterI numVertex k ⟨i.val+1, ival⟩ conn
-    else conn
-def iterK (numVertex: Nat) (k: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
-    --dbg_trace "iterK {k}";
-    let conn := iterI numVertex k ⟨0, k.pos⟩ conn
-    if kval: k.val + 1 < numVertex then
-      iterK numVertex ⟨k.val+1, kval⟩ conn
-    else conn
-/-
-def warshallAlgo (edges: List ((Fin numVertex) × (Fin numVertex))): warshallAlgo.Conn numVertex :=
-  dbg_trace "beginWarshall {numVertex}";
-  let connected := ArrayMap.init false
-  if nontrivial: 0 < numVertex then
-    dbg_trace "haveArraymap {connected.data.size}";
-    let connected := edges.foldl (fun conn e => conn.set e true) connected
-    dbg_trace "haveEdges {edges.length}";
-    let connected := (List.finRange numVertex).foldl (fun conn v => conn.set (v, v) true) connected
-    dbg_trace "haveVertices";
-    iterK numVertex ⟨0, nontrivial⟩ connected
-  else connected
--/
+def iterKIJ (k i j: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
+  let conn := innermost numVertex k i j conn
+  if jval: j.val + 1 < numVertex then
+    iterKIJ k i ⟨j.val+1, jval⟩ conn
+  else if ival: i.val + 1 < numVertex then
+    iterKIJ k ⟨i.val+1, ival⟩ ⟨0, k.pos⟩ conn
+  else if kval: k.val + 1 < numVertex then
+    iterKIJ ⟨k.val+1, kval⟩ ⟨0, k.pos⟩ ⟨0, k.pos⟩ conn
+  else
+    conn
+end testscope
+
 def warshallAlgo (edges: List ((Fin numVertex) × (Fin numVertex))): warshallAlgo.Conn numVertex :=
   --dbg_trace "beginWarshall {numVertex}";
   let connected := ArrayMap.init false
@@ -243,7 +226,7 @@ def warshallAlgo (edges: List ((Fin numVertex) × (Fin numVertex))): warshallAlg
     --dbg_trace "haveEdges {edges}";
     let connected := (List.finRange numVertex).foldl (fun conn v => conn.set (v, v) true) connected
     --dbg_trace "haveVertices";
-    iterK numVertex ⟨0, nontrivial⟩ connected
+    testscope.iterKIJ numVertex ⟨0, nontrivial⟩ ⟨0, nontrivial⟩ ⟨0, nontrivial⟩ connected
   else connected
 
 --def genericWarshallAlgo [FinEnum α] (edges: List (α × α))
