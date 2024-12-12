@@ -195,28 +195,82 @@ def warshallAlgo {numVertex: Nat} (edges: List ((Fin numVertex) × (Fin numVerte
   ) connected
 -/
 --variable {numVertex: Nat}
-abbrev warshallAlgo.Conn (numVertex: Nat) := ArrayMap ((Fin numVertex) × (Fin numVertex)) Bool
-def innermost (numVertex: Nat) (k i j: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
+abbrev Fin32 (n: UInt32) := { val: UInt32 // val < n }
+def Fin32.succ (f: Fin32 n): Option (Fin32 n) := if v: f.val + 1 < n then some ⟨f.val + 1, v⟩ else none
+theorem Fin32.pos (i : Fin32 n) : 0 < n :=
+  Nat.lt_of_le_of_lt (Nat.zero_le _) i.2
+instance enumFin32: FinEnum (Fin32 n) where
+  card := n.toNat
+  equiv := {
+    toFun x := ⟨x.val.toNat, x.prop⟩
+    invFun x := ⟨UInt32.ofNatCore x.val (Nat.lt_trans x.prop (UInt32.toNat_lt_size n)), (by
+      rw [UInt32.lt_iff_toNat_lt, UInt32.toNat_ofNatCore]
+      exact x.prop
+    )⟩
+    left_inv x := by
+      simp
+      convert Subtype.coe_eta _ _
+      exact x.prop
+    right_inv x := by simp
+  }
+def Fin.toFin32 (f: Fin n) (h: n < UInt32.size): (Fin32 n.toUInt32) := enumFin32.equiv.symm (f.cast (by
+  unfold FinEnum.card
+  unfold enumFin32
+  simp
+  rw [Nat.mod_eq_of_lt h]
+))
+
+abbrev warshallAlgo.Conn (numVertex: UInt32) := ArrayMap ((Fin32 numVertex) × (Fin32 numVertex)) Bool
+def innermost (numVertex: UInt32) (k i j: Fin32 numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
     let set := (conn.get (i, k)) && (conn.get (k, j))
     --dbg_trace "innermost {k} {i} {j} {set}";
     if set then
       conn.set (i, j) true
     else conn
-def iterJ (numVertex: Nat) (k i j: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
+def iterJ (numVertex: UInt32) (k i j: Fin32 numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
     --dbg_trace "iterJ {k} {i} {j}";
     if jval: j.val + 1 < numVertex then
       iterJ numVertex k i ⟨j.val+1, jval⟩ (innermost numVertex k i j conn)
     else conn
-def iterI (numVertex: Nat) (k i: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
+termination_by numVertex - j.val
+decreasing_by sorry
+def iterI (numVertex: UInt32) (k i: Fin32 numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
     --dbg_trace "iterI {k} {i}";
     if ival: i.val + 1 < numVertex then
       iterI numVertex k ⟨i.val+1, ival⟩ (iterJ numVertex k i ⟨0, k.pos⟩ conn)
     else conn
-def iterK (numVertex: Nat) (k: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
+termination_by numVertex - i.val
+decreasing_by sorry
+def iterK (numVertex: UInt32) (k: Fin32 numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
     --dbg_trace "iterK {k}";
-    if kval: k.val + 1 < numVertex then
-      iterK numVertex ⟨k.val+1, kval⟩ (iterI numVertex k ⟨0, k.pos⟩ conn)
-    else conn
+    match k.succ with
+    | some nextk => iterK numVertex nextk (iterI numVertex k ⟨0, k.pos⟩ conn)
+    | none => conn
+termination_by numVertex - k.val
+decreasing_by sorry
+/-
+decreasing_by
+  simp
+  --rw [<-UInt32.lt_iff_toNat_lt]
+  rw [UInt32.toNat_sub_of_le _ _ (Nat.le_of_lt kval), UInt32.toNat_sub_of_le _ _ (Nat.le_of_lt k.prop)]
+  convert Nat.sub_lt_sub_left (m:=numVertex.toNat) _ _
+  . rw [<-UInt32.lt_iff_toNat_lt]
+    exact k.prop
+  . rw [UInt32.toNat_add]
+    rw [Nat.mod_eq_of_lt _]
+    . simp
+    .
+      have lul := UInt32.lt_iff_toNat_lt.mp k.prop
+
+      --have lul2 := UInt32.toNat_lt_size numVertex
+      --have lul3 := Nat.lt_trans lul lul2
+      simp only [UInt32.reduceToNat]
+
+    --rw [Nat.mod_eq_of_lt (Nat.lt_trans (UInt32.lt_iff_toNat_lt.mp k.prop) sorry)]
+
+    --rw [<-UInt32.lt_iff_toNat_lt]
+    --simp
+-/
 /-
 def warshallAlgo (edges: List ((Fin numVertex) × (Fin numVertex))): warshallAlgo.Conn numVertex :=
   dbg_trace "beginWarshall {numVertex}";
@@ -230,15 +284,17 @@ def warshallAlgo (edges: List ((Fin numVertex) × (Fin numVertex))): warshallAlg
     iterK numVertex ⟨0, nontrivial⟩ connected
   else connected
 -/
-def warshallAlgo (edges: List ((Fin numVertex) × (Fin numVertex))): warshallAlgo.Conn numVertex :=
+def warshallAlgo (edges: List ((Fin numVertex) × (Fin numVertex))): warshallAlgo.Conn numVertex.toUInt32 :=
   dbg_trace "beginWarshall {numVertex}";
   let connected := ArrayMap.init false
-  if nontrivial: 0 < numVertex then
-    let connected := edges.foldl (fun conn e => conn.set e true) connected
-    dbg_trace "haveEdges {edges.length}";
-    let connected := (List.finRange numVertex).foldl (fun conn v => conn.set (v, v) true) connected
-    dbg_trace "haveVertices";
-    iterK numVertex ⟨0, nontrivial⟩ connected
+  if nonhuge: numVertex < UInt32.size then
+    if nontrivial: 0 < numVertex.toUInt32 then
+      let connected := edges.foldl (fun conn (x, y) => conn.set (x.toFin32 nonhuge, y.toFin32 nonhuge) true) connected
+      dbg_trace "haveEdges {edges.length}";
+      let connected := (List.finRange numVertex).foldl (fun conn v => conn.set (v.toFin32 nonhuge, v.toFin32 nonhuge) true) connected
+      dbg_trace "haveVertices";
+      iterK numVertex.toUInt32 ⟨0, nontrivial⟩ connected
+    else connected
   else connected
 
 --def genericWarshallAlgo [FinEnum α] (edges: List (α × α))
@@ -256,9 +312,12 @@ def scoreTrailheads (m: Map) :=
   let genericEdges := edges.map (·.map feCoords.equiv feCoords.equiv)
   let byLevel := m.byLevel
   let transitiveConnections := warshallAlgo genericEdges
+  if nonhuge: feCoords.card < UInt32.size then
   ((byLevel.get 0).map (fun zero =>
-    (byLevel.get 9).countP (fun nine => transitiveConnections.get (feCoords.equiv zero, feCoords.equiv nine))
+    (byLevel.get 9).countP (fun nine => transitiveConnections.get ((feCoords.equiv zero).toFin32 nonhuge, (feCoords.equiv nine).toFin32 nonhuge))
   )).sum
+  else
+  0
 
 
 --#eval exampleInput.map scoreTrailheads
