@@ -150,8 +150,7 @@ where
 
 --#eval Coords.neighbors (h := 10) (w := 10) (5, 5)
 
-/-
-def scoreTrailheads (m: Map): Nat :=
+def scoreTrailheadsRating (m: Map): Nat :=
   let byLevel := m.byLevel
   let work := (List.finRange 10).foldr (fun i work =>
     match i with
@@ -165,6 +164,7 @@ where
       work.update coord (((coord.neighbors.filter (fun nc => (m.get nc) = (l + 1))).map (work.get ·)).sum)
     ) work
 
+/-
 def scoreTrailheads2 (m: Map) :=
   let byLevel := m.byLevel
   let work := (List.finRange 10).foldr (fun i work =>
@@ -197,25 +197,30 @@ def warshallAlgo {numVertex: Nat} (edges: List ((Fin numVertex) × (Fin numVerte
 --variable {numVertex: Nat}
 abbrev warshallAlgo.Conn (numVertex: Nat) := ArrayMap ((Fin numVertex) × (Fin numVertex)) Bool
 def innermost (numVertex: Nat) (k i j: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
-    let set := (conn.get (i, k)) && (conn.get (k, j))
-    --dbg_trace "innermost {k} {i} {j} {set}";
-    if set then
+    let s1 := conn.get (i, k)
+    let s2 := conn.get (k, j)
+    --let set := (conn.get (i, k)) && (conn.get (k, j))
+    --dbg_trace "innermost {i}->{k}: {s1}\t{k}->{j}: {s2}";
+    if s1 && s2 then
       conn.set (i, j) true
     else conn
 def iterJ (numVertex: Nat) (k i j: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
     --dbg_trace "iterJ {k} {i} {j}";
+    let conn := innermost numVertex k i j conn
     if jval: j.val + 1 < numVertex then
-      iterJ numVertex k i ⟨j.val+1, jval⟩ (innermost numVertex k i j conn)
+      iterJ numVertex k i ⟨j.val+1, jval⟩ conn
     else conn
 def iterI (numVertex: Nat) (k i: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
     --dbg_trace "iterI {k} {i}";
+    let conn := iterJ numVertex k i ⟨0, k.pos⟩ conn
     if ival: i.val + 1 < numVertex then
-      iterI numVertex k ⟨i.val+1, ival⟩ (iterJ numVertex k i ⟨0, k.pos⟩ conn)
+      iterI numVertex k ⟨i.val+1, ival⟩ conn
     else conn
 def iterK (numVertex: Nat) (k: Fin numVertex) (conn: warshallAlgo.Conn numVertex): warshallAlgo.Conn numVertex :=
     --dbg_trace "iterK {k}";
+    let conn := iterI numVertex k ⟨0, k.pos⟩ conn
     if kval: k.val + 1 < numVertex then
-      iterK numVertex ⟨k.val+1, kval⟩ (iterI numVertex k ⟨0, k.pos⟩ conn)
+      iterK numVertex ⟨k.val+1, kval⟩ conn
     else conn
 /-
 def warshallAlgo (edges: List ((Fin numVertex) × (Fin numVertex))): warshallAlgo.Conn numVertex :=
@@ -231,13 +236,13 @@ def warshallAlgo (edges: List ((Fin numVertex) × (Fin numVertex))): warshallAlg
   else connected
 -/
 def warshallAlgo (edges: List ((Fin numVertex) × (Fin numVertex))): warshallAlgo.Conn numVertex :=
-  dbg_trace "beginWarshall {numVertex}";
+  --dbg_trace "beginWarshall {numVertex}";
   let connected := ArrayMap.init false
   if nontrivial: 0 < numVertex then
     let connected := edges.foldl (fun conn e => conn.set e true) connected
-    dbg_trace "haveEdges {edges.length}";
+    --dbg_trace "haveEdges {edges}";
     let connected := (List.finRange numVertex).foldl (fun conn v => conn.set (v, v) true) connected
-    dbg_trace "haveVertices";
+    --dbg_trace "haveVertices";
     iterK numVertex ⟨0, nontrivial⟩ connected
   else connected
 
@@ -253,13 +258,22 @@ def scoreTrailheads (m: Map) :=
       (c.neighbors.filter (fun n => nval = m.get n)).map (c, ·)
     else []
   )
+  --dbg_trace "{edges}";
   let genericEdges := edges.map (·.map feCoords.equiv feCoords.equiv)
   let byLevel := m.byLevel
   let transitiveConnections := warshallAlgo genericEdges
+  --dbg_trace "{repr transitiveConnections.data}";
   ((byLevel.get 0).map (fun zero =>
-    (byLevel.get 9).countP (fun nine => transitiveConnections.get (feCoords.equiv zero, feCoords.equiv nine))
+    (byLevel.get 9).countP (fun nine =>
+      --dbg_trace "{zero} {nine}";
+      transitiveConnections.get (feCoords.equiv zero, feCoords.equiv nine))
   )).sum
 
+
+def arraytest (a: Array Bool) (i: USize): Bool := if h: i < a.usize then a.uget i (by
+  rw [Array.usize, Nat.toUSize, USize.lt_iff_toNat_lt, USize.toNat_ofNat, Nat.mod_def] at h
+  exact Nat.lt_of_add_right_lt (Nat.add_lt_of_lt_sub h)
+) else false
 
 --#eval exampleInput.map scoreTrailheads
 
@@ -270,7 +284,7 @@ def main (args: List String) : IO Unit := do
   | none => IO.println "Invalid input"
   | some map =>
     if args[0]? = "2" then
-      let result := "sorry"
+      let result := scoreTrailheadsRating map
       IO.println s!"Result: {result}"
     else
       let result := scoreTrailheads map
