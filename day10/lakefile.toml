@@ -1,0 +1,16 @@
+name = "day10-test"
+version = "0.1.0"
+keywords = ["math"]
+defaultTargets = ["Day10Test"]
+
+[leanOptions]
+pp.unicode.fun = true # pretty-prints `fun a ↦ b`
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+
+[[lean_exe]]
+name = "Day10Test"
+buildType = "relWithDebInfo"
+moreLeanArgs = ["-DstderrAsMessages=false"]
