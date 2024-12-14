@@ -43,13 +43,11 @@ def predecessors2d (x: Fin h) (y: Fin w): List ((Fin h) × (Fin w)) :=
 def predecessors (f: Fin n) (width: Nat): List (Fin n) :=
   (if width ≤ f.val then [⟨f - width, Nat.lt_of_le_of_lt (Nat.sub_le f.val width) f.isLt⟩] else [])
   ++
-  (if nz: f.val > 0 then [⟨f.val - 1, Nat.sub_one_lt_of_le nz (Nat.le_of_lt f.isLt)⟩] else [])
+  (if nz: f.val > 0 ∧ (f.val % width ≠ 0) then [⟨f.val - 1, Nat.sub_one_lt_of_le nz.left (Nat.le_of_lt f.isLt)⟩] else [])
 theorem preds_max_2: (predecessors x y).length < 3 := by
   simp [predecessors, List.length_append]
   repeat split ; repeat simp
 
---theorem Nat.lt_intro_sub (c: Nat) (h: a < b) : a - c < b :=
---  Nat.sub_lt_right_of_lt_add
 
 -- prove equivalence of predecessors2d and predecessors to show that predecessors is correct
 theorem predecessors2d_1d_eq (x: Fin h) (y: Fin w): predecessors2d x y = (predecessors (FinEnum.equiv (x, y)) w).map FinEnum.equiv.symm := by
@@ -60,49 +58,50 @@ theorem predecessors2d_1d_eq (x: Fin h) (y: Fin w): predecessors2d x y = (predec
     case isTrue ygz =>
       simp
       split
-      case isTrue =>
+      case isTrue ht2 =>
         simp
         split
         case isTrue =>
           simp
           apply And.intro <;> apply And.intro
-          . sorry
+          . --rw [div_sub_same (a:=(x.val * w + y.val)) (b:=w) _]
+            rw [<-Nat.succ.injEq, Nat.succ_eq_add_one, Nat.succ_eq_add_one, ←Nat.div_eq_sub_div y.pos ht2, Nat.add_comm _ y, Nat.add_mul_div_right y.val x.val y.pos, Nat.div_eq_of_lt y.isLt, Nat.sub_one_add_one (Nat.ne_of_lt xgz).symm]
+            simp
           . sorry
           . sorry
           . sorry
         case isFalse hyp =>
-          rw [not_or] at hyp
-          have yz: ¬0 < y.val := hyp.right
-          contradiction
+          simp at hyp
+          have hyp := hyp (Or.inr ygz)
+          rw [Nat.mul_add_mod', Nat.mod_eq_of_lt y.isLt] at hyp
+          exact absurd hyp (Nat.ne_of_lt ygz).symm
       case isFalse hyp =>
-        simp
         simp at hyp
         apply Nat.lt_of_add_right_lt at hyp
-        --have lol := Nat.le_mul_of_pos_right _ _
-        --contradiction
-        sorry
+        exact absurd hyp (Nat.le_lt_asymm (Nat.le_mul_of_pos_left w xgz))
     case isFalse yz =>
+      simp at yz
       simp
-      split <;> split
-      case isTrue.isTrue a b =>
-        -- bug found here: -1 should not be allowed if divisible by width
-        sorry
-      case isTrue.isFalse a b =>
-        sorry
-      case isFalse.isTrue a b =>
-        simp
-        simp at a
-        apply Nat.lt_of_add_right_lt at a
-        --have lol := Nat.le_mul_of_pos_right _ _
-        --contradiction
-        sorry
-      case isFalse.isFalse a b =>
-        simp
-        simp at a
-        apply Nat.lt_of_add_right_lt at a
-        --have lol := Nat.le_mul_of_pos_right _ _
-        --contradiction
-        sorry
+      split
+      case isTrue a =>
+        split
+        case isTrue b =>
+          -- bug found here: -1 should not be allowed if divisible by width
+          -- (bug exists no longer)
+          rw [Nat.mul_add_mod', Nat.mod_eq_of_lt y.isLt] at b
+          exact absurd yz b.right
+        case isFalse b =>
+          simp
+          apply And.intro
+          . simp [yz]
+            rw [←Nat.sub_one_mul, Nat.mul_div_cancel (x.val - 1) y.pos]
+          . rw [Fin.ext_iff]
+            simp [*]
+            rw [←Nat.sub_one_mul, Nat.mul_mod_left]
+      case isFalse a =>
+        simp [yz]
+        simp [yz] at a
+        exact absurd a (Nat.le_lt_asymm (Nat.le_mul_of_pos_left w xgz))
   case isFalse xez =>
     simp at xez
     split
@@ -114,11 +113,18 @@ theorem predecessors2d_1d_eq (x: Fin h) (y: Fin w): predecessors2d x y = (predec
         simp
       case isFalse =>
         simp
-        apply And.intro
-        . rw [Fin.ext_iff]
-          simp [*]
-          exact (Nat.div_eq_of_lt _).symm
-        . exact (Nat.mod_eq_of_lt (Nat.sub_lt_right_of_lt_add _ (Nat.lt_add_right 1 y.isLt))).symm
+        split
+        case isTrue ym0 =>
+          rw [Nat.mod_eq_of_lt y.isLt] at ym0
+          apply Nat.ne_of_lt at ygz
+          exact absurd ym0 ygz.symm
+        case isFalse ymn0 =>
+          simp
+          apply And.intro
+          . rw [Fin.ext_iff]
+            simp [*]
+            exact (Nat.div_eq_of_lt _).symm
+          . exact (Nat.mod_eq_of_lt (Nat.sub_lt_right_of_lt_add _ (Nat.lt_add_right 1 y.isLt))).symm
     case isFalse yz =>
       simp [*]
 
