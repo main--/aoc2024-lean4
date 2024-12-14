@@ -11,12 +11,17 @@ inductive RegionEntry where
 deriving Repr
 
 structure Worker (h w: Nat) where
-  iteration: Fin (w * h)
+  iteration: Fin (w * h + 1)
   groups: Array RegionEntry
   regionAssignments: Vector Nat iteration
   raValid: ∀ (i: Nat), i ∈ regionAssignments.toArray → i < groups.size
   mergedGroupsValid: ∀ (i j: Nat), groups[i]? = some (RegionEntry.merged j) → (j < i)
 deriving Repr
+
+inductive IterResult (h w: Nat) where
+| cont (w: Worker h w)
+| done (groups: Array RegionEntry)
+
 /-
 idea: iterate in order across all fields on the map
 look at all matching predecessors
@@ -42,8 +47,8 @@ def Worker.resolveRegion (w: Worker h w) (reg: Fin w.groups.size): (Region × (F
     )
     w.resolveRegion ⟨j, Nat.lt_trans ltreg reg.isLt⟩
 
-def Worker.prices (w: Worker h w): List Nat :=
-  w.groups.toList.filterMap (fun re => match re with
+def Worker.prices (groups: Array RegionEntry): List Nat :=
+  groups.toList.filterMap (fun re => match re with
   | RegionEntry.merged _ => none
   | RegionEntry.region r => some (r.area * r.perimeter)
   )
@@ -60,15 +65,23 @@ def predecessors2d (x: Fin h) (y: Fin w): List ((Fin h) × (Fin w)) :=
   (if nz: x.val > 0 then [(⟨x.val - 1, Nat.sub_one_lt_of_le nz (Nat.le_of_lt x.isLt)⟩, y)] else [])
   ++
   (if nz: y.val > 0 then [(x, ⟨y.val - 1, Nat.sub_one_lt_of_le nz (Nat.le_of_lt y.isLt)⟩)] else [])
-def predecessors (f: Fin n) (width: Nat): List (Fin n) :=
-  (if width ≤ f.val then [⟨f - width, Nat.lt_of_le_of_lt (Nat.sub_le f.val width) f.isLt⟩] else [])
+def predecessors (f: Fin n) (width: Nat): List (Fin f) :=
+  (if cond: 0 < width ∧ width ≤ f.val then
+  have f_valid: f.val - width < f.val := (by
+    apply Nat.sub_lt
+    . apply Nat.lt_of_lt_of_le
+      . exact cond.left
+      . exact cond.right
+    . exact cond.left
+  )--Nat.sub_lt (Nat.lt_of_lt_of_le cond.left cond.right) cond.left
+  [⟨f - width, f_valid⟩] else [])
   ++
-  (if nz: f.val > 0 ∧ (f.val % width ≠ 0) then [⟨f.val - 1, Nat.sub_one_lt_of_le nz.left (Nat.le_of_lt f.isLt)⟩] else [])
+  (if nz: f.val > 0 ∧ (f.val % width ≠ 0) then [(Fin.last (f.val - 1)).cast (Nat.sub_one_add_one (Nat.ne_of_gt nz.left))] else [])
 theorem preds_max_2: (predecessors x y).length < 3 := by
   simp [predecessors, List.length_append]
   repeat split ; repeat simp
 
-
+/-
 -- prove equivalence of predecessors2d and predecessors to show that predecessors is correct
 theorem predecessors2d_1d_eq (x: Fin h) (y: Fin w): predecessors2d x y = (predecessors (FinEnum.equiv (x, y)) w).map FinEnum.equiv.symm := by
   simp [predecessors, predecessors2d, FinEnum.equiv, betterEnumProd, betterEnumFin]
@@ -147,7 +160,7 @@ theorem predecessors2d_1d_eq (x: Fin h) (y: Fin w): predecessors2d x y = (predec
           . exact (Nat.mod_eq_of_lt (Nat.sub_lt_right_of_lt_add sorry (Nat.lt_add_right 1 y.isLt))).symm
     case isFalse yz =>
       simp [*]
-
+-/
 
 
 def flattenMap (map: Vector (Vector Char w) h): Vector Char (w * h) :=
@@ -167,95 +180,238 @@ def flattenMap (map: Vector (Vector Char w) h): Vector Char (w * h) :=
       -- slowly getting the hang of this =)
   )⟩
 
-def Worker.work {h w: Nat} (wrk: Worker h w) (map: Vector Char (w * h)) :=
-  (List.range (w*h)).foldl (iter · ⟨·, sorry⟩) wrk
-where
-  iter (wrk: Worker h w) (i: Fin wrk.iteration): Worker h w :=
-    let sym := map.get (i.castLE wrk.iteration.isLt)
-    let relevant_preds: List (Fin wrk.iteration) := (predecessors i w).filter (fun i2 =>
-      let sym2 := map.get (i2.castLE wrk.iteration.isLt)
-      sym2 = sym
-    )
-    have lenmax: relevant_preds.length < 3 := Nat.lt_of_le_of_lt (List.length_filter_le _ _) preds_max_2
-    match rpm: relevant_preds with
-    | [] =>
-      -- no matching region, so we create a new one
-      let regid := wrk.groups.size
-      let groups := wrk.groups.push (RegionEntry.region { area := 1, perimeter := 4 })
-      have gsp1: groups.size = wrk.groups.size + 1 := by
-        unfold groups
-        simp [List.push_toArray, Array.size_toArray, List.length_append]
-      {
-        iteration := ⟨wrk.iteration.val + 1, sorry⟩,
-        regionAssignments := wrk.regionAssignments.push regid,
-        groups,
-        raValid := (by
-          intro i
-          simp [ArrayMap.set]
-          rw [<-Array.mem_toList]
-          intro somei
+def Worker.run_iteration {h w: Nat} (wrk: Worker h w) (map: Vector Char (w * h)) (notdone: ↑wrk.iteration < (w * h)): Worker h w :=
+  let cur_iter: Fin (w*h) := ⟨wrk.iteration, notdone⟩
+  let next_iter := cur_iter.succ
+  let sym := map.get cur_iter
+  let preFilter := predecessors cur_iter w
+  let relevant_preds: List (Fin cur_iter) := preFilter.filter (fun i2 =>
+    let sym2 := map.get (i2.castLE cur_iter.isLt)
+    sym2 = sym
+  )
+  have lenmax: relevant_preds.length < 3 := Nat.lt_of_le_of_lt (List.length_filter_le _ preFilter) preds_max_2
+  match rpm: relevant_preds with
+  | [] =>
+    -- no matching region, so we create a new one
+    let regid := wrk.groups.size
+    let groups := wrk.groups.push (RegionEntry.region { area := 1, perimeter := 4 })
+    have gsp1: groups.size = wrk.groups.size + 1 := by
+      unfold groups
+      simp [List.push_toArray, Array.size_toArray, List.length_append]
+    {
+      iteration := next_iter,
+      regionAssignments := wrk.regionAssignments.push regid,
+      groups,
+      raValid := (by
+        intro i
+        simp [ArrayMap.set]
+        rw [<-Array.mem_toList]
+        intro somei
 
-          --apply List.mem_or_eq_of_mem_set at somei
-          simp at somei
-          exact somei.by_cases (fun ind => by
-            apply wrk.raValid at ind
-            rw [gsp1]
-            exact Nat.lt_add_one_of_lt ind
-          ) (fun base => by
-            rw [gsp1, base]
-            unfold regid
-            simp
+        --apply List.mem_or_eq_of_mem_set at somei
+        simp at somei
+        exact somei.by_cases (fun ind => by
+          apply wrk.raValid at ind
+          rw [gsp1]
+          exact Nat.lt_add_one_of_lt ind
+        ) (fun base => by
+          rw [gsp1, base]
+          unfold regid
+          simp
+        )
+      )
+      mergedGroupsValid := (by
+        intro i j hyp
+        unfold groups at hyp
+        by_cases hc: i = wrk.groups.size
+        .
+          rw [hc, Array.getElem?_eq_some_iff] at hyp
+          simp at hyp
+        .
+          simp [Array.getElem?_push, hc] at hyp
+          exact wrk.mergedGroupsValid i j hyp
+      )
+    }
+  | [pred] =>
+    -- add the current tile to the existing region, only one side touches (for now)
+    let existingRegion := wrk.regionAssignments.get pred
+    let (region, regid) := wrk.resolveRegion ⟨existingRegion, wrk.raValid existingRegion (
+      Array.getElem_mem _
+    )⟩
+    {
+      iteration := next_iter,
+      regionAssignments := wrk.regionAssignments.push existingRegion
+      groups := wrk.groups.set regid (RegionEntry.region { area := region.area + 1, perimeter := region.perimeter + 4 - 2 })
+      raValid := (by
+        intro i hyp
+        have ih := wrk.raValid
+        rw [Array.size_set]
+        rw [Vector.toArray_push, Array.mem_push] at hyp
+        apply hyp.elim
+        . exact ih i
+        . intro iex
+          --unfold Vector.get at existingRegion
+          unfold existingRegion at iex
+          unfold Vector.get at iex
+          conv at iex =>
+            rhs
+            congr
+            . skip
+            . simp
+          have idxele := Array.getElem_mem (l:=wrk.regionAssignments.toArray) (pred.isLt.trans_eq ((Vector.size_toArray wrk.regionAssignments).symm))
+          rw [←iex] at idxele
+          exact ih i idxele
+      )
+      mergedGroupsValid := (by
+        intro i j hyp
+        unfold groups at hyp
+        rw [Array.getElem?_eq_some_iff] at hyp
+        exact hyp.elim (fun ha => by
+          rw [Array.getElem_set]
+          split
+          . simp
+          . intro ismerge
+            rw [Array.size_set] at ha
+            rw [←Option.some_inj, ←Array.getElem?_eq_getElem] at ismerge
+            exact wrk.mergedGroupsValid i j ismerge
+        )
+      )
+    }
+  | [p1, p2] =>
+    let existingRegion1 := wrk.regionAssignments.get p1
+    let existingRegion2 := wrk.regionAssignments.get p2
+    let (region1, regid1) := wrk.resolveRegion ⟨existingRegion1, wrk.raValid existingRegion1 (Array.getElem_mem _)⟩
+    let (region2, regid2) := wrk.resolveRegion ⟨existingRegion2, wrk.raValid existingRegion2 (Array.getElem_mem _)⟩
+    if neq: regid2 == regid1 then
+      -- add the current tile to the existing region, but this time with two sides touching
+      -- region1 = region2 btw
+      {
+        iteration := next_iter,
+        regionAssignments := wrk.regionAssignments.push existingRegion1
+        groups := wrk.groups.set regid1 (RegionEntry.region { area := region1.area + 1, perimeter := region1.perimeter + 4 - 4 })
+        raValid := (by
+          intro i hyp
+          have ih := wrk.raValid
+          rw [Array.size_set]
+          rw [Vector.toArray_push, Array.mem_push] at hyp
+          apply hyp.elim
+          . exact ih i
+          . intro iex
+            --unfold Vector.get at existingRegion
+            unfold existingRegion1 at iex
+            unfold Vector.get at iex
+            conv at iex =>
+              rhs
+              congr
+              . skip
+              . simp
+            have idxele := Array.getElem_mem (l:=wrk.regionAssignments.toArray) (p1.isLt.trans_eq ((Vector.size_toArray wrk.regionAssignments).symm))
+            rw [←iex] at idxele
+            exact ih i idxele
+        )
+        mergedGroupsValid := (by
+          intro i j hyp
+          unfold groups at hyp
+          rw [Array.getElem?_eq_some_iff] at hyp
+          exact hyp.elim (fun ha => by
+            rw [Array.getElem_set]
+            split
+            . simp
+            . intro ismerge
+              rw [Array.size_set] at ha
+              rw [←Option.some_inj, ←Array.getElem?_eq_getElem] at ismerge
+              exact wrk.mergedGroupsValid i j ismerge
           )
         )
-        mergedGroupsValid := sorry
       }
-    | [pred] =>
-      -- add the current tile to the existing region, only one side touches (for now)
-      let existingRegion := wrk.regionAssignments.get pred
-      let (region, regid) := wrk.resolveRegion ⟨existingRegion, wrk.raValid existingRegion (
-        Array.getElem_mem _
-      )⟩
-      {
-        iteration := ⟨wrk.iteration.val + 1, sorry⟩,
-        regionAssignments := wrk.regionAssignments.push existingRegion
-        groups := wrk.groups.set regid (RegionEntry.region { area := region.area + 1, perimeter := region.perimeter + 4 - 2 })
-        raValid := sorry
-        mergedGroupsValid := sorry
-      }
-    | [p1, p2] =>
-      let existingRegion1 := wrk.regionAssignments.get p1
-      let existingRegion2 := wrk.regionAssignments.get p2
-      let (region1, regid1) := wrk.resolveRegion ⟨existingRegion1, wrk.raValid existingRegion1 (Array.getElem_mem _)⟩
-      let (region2, regid2) := wrk.resolveRegion ⟨existingRegion2, wrk.raValid existingRegion2 (Array.getElem_mem _)⟩
-      if regid1 == regid2 then
-        -- add the current tile to the existing region, but this time with two sides touching
-        -- region1 = region2 btw
-        {
-          iteration := ⟨wrk.iteration.val + 1, sorry⟩,
-          regionAssignments := wrk.regionAssignments.push existingRegion1
-          groups := wrk.groups.set regid1 (RegionEntry.region { area := region1.area + 1, perimeter := region1.perimeter + 4 - 4 })
-          raValid := sorry
-          mergedGroupsValid := sorry
-        }
-      else
-        -- the current tile merges two regions that were separate before
-        {
-          iteration := ⟨wrk.iteration.val + 1, sorry⟩,
-          regionAssignments := wrk.regionAssignments.push existingRegion1
-          groups := (
-            wrk.groups.set regid1 (RegionEntry.region { area := region1.area + region2.area + 1, perimeter := region1.perimeter + region2.perimeter + 4 - 4 })
-            ).set regid2 (RegionEntry.merged regid1)
-          raValid := sorry
-          mergedGroupsValid := sorry
-        }
-    | x1::x2::x3::xs =>
-      have lenmin: relevant_preds.length ≥ 3 := (by simp [rpm])
-      absurd lenmin (by
-        rw [<-rpm] at lenmax
+    else
+      -- the current tile merges two regions that were separate before
+      let keepreg := min regid1 regid2
+      let mergereg := max regid1 regid2
+      have mergeSmaller: ↑keepreg < ↑mergereg := by
+        unfold keepreg
+        unfold mergereg
         simp
-        exact lenmax
-      )
+        simp at neq
+        exact neq
+      {
+        iteration := next_iter,
+        regionAssignments := wrk.regionAssignments.push existingRegion1
+        groups := (
+          wrk.groups.set keepreg (RegionEntry.region { area := region1.area + region2.area + 1, perimeter := region1.perimeter + region2.perimeter + 4 - 4 })
+          ).set mergereg (RegionEntry.merged keepreg)
+        raValid := (by
+          intro i hyp
+          have ih := wrk.raValid
+          rw [Array.size_set]
+          rw [Array.size_set]
+          rw [Vector.toArray_push, Array.mem_push] at hyp
+          apply hyp.elim
+          . exact ih i
+          . intro iex
+            unfold existingRegion1 at iex
+            unfold Vector.get at iex
+            conv at iex =>
+              rhs
+              congr
+              . skip
+              . simp
+            have idxele := Array.getElem_mem (l:=wrk.regionAssignments.toArray) (p1.isLt.trans_eq ((Vector.size_toArray wrk.regionAssignments).symm))
+            rw [←iex] at idxele
+            exact ih i idxele
+        )
+        mergedGroupsValid := (by
+          intro i j hyp
+          unfold groups at hyp
+          rw [Array.getElem?_eq_some_iff] at hyp
+          exact hyp.elim (fun ha => by
+            rw [Array.getElem_set]
+            rw [Array.getElem_set]
+            split <;> try split
+            . intro ismerge
+              repeat rw [Array.size_set] at ha
+              simp at ismerge
+              rename_i mi
+              rw [←mi, ←ismerge]
+              exact mergeSmaller
+            . simp
+            . intro ismerge
+              rw [Array.size_set] at ha
+              rw [←Option.some_inj, ←Array.getElem?_eq_getElem] at ismerge
+              exact wrk.mergedGroupsValid i j ismerge
+          )
+        )
+      }
+  | x1::x2::x3::xs =>
+    have lenmin: relevant_preds.length ≥ 3 := (by simp [rpm])
+    have nlenmin: ¬(relevant_preds.length ≥ 3) := (by
+      rw [<-rpm] at lenmax
+      simp
+      exact lenmax
+    )
+    {
+      iteration := next_iter,
+      regionAssignments := absurd lenmin nlenmin,
+      groups := absurd lenmin nlenmin,
+      raValid := absurd lenmin nlenmin,
+      mergedGroupsValid := absurd lenmin nlenmin,
+    }
+
+theorem Worker.iter_inc {w h: Nat} {map: Vector Char (w*h)} (wrk: Worker h w) (notdone: ↑wrk.iteration < (w * h)): (wrk.run_iteration map notdone).iteration.val = wrk.iteration.val + 1 := by
+  simp [Worker.run_iteration]
+  repeat split <;> repeat simp
+def Worker.work {h w: Nat} (wrk: Worker h w) (map: Vector Char (w * h)) :=
+  if notdone: ↑wrk.iteration < (w * h) then
+    (wrk.run_iteration map notdone).work map
+  else
+    wrk.groups
+termination_by (w * h) - wrk.iteration
+decreasing_by
+  rw [wrk.iter_inc]
+  refine Nat.sub_lt_sub_left notdone ?_
+  simp
+
 
 def worker44: Worker 4 4 := Worker.make (by simp) (by simp)
 
-#eval! (worker44.work (flattenMap exampleData)).prices.sum
+#eval (Worker.prices (worker44.work (flattenMap exampleData))).sum
