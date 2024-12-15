@@ -1,5 +1,7 @@
 import Day12Etc.ArrayMap
 
+namespace Day12
+
 structure Region where
   area: Nat
   perimeter: Nat
@@ -414,4 +416,55 @@ decreasing_by
 
 def worker44: Worker 4 4 := Worker.make (by simp) (by simp)
 
-#eval (Worker.prices (worker44.work (flattenMap exampleData))).sum
+#guard 140 = (Worker.prices (worker44.work (flattenMap exampleData))).sum
+
+structure ParsedMap where
+  width: Nat
+  height: Nat
+  map: Vector (Vector Char width) height
+
+def parseInput (s: String): Option ParsedMap :=
+  let lines := s.splitOn "\n"
+  let height := lines.length
+  if nonempty: height = 0
+  then none
+  else
+    let width := lines[0].length
+    let map: List (Option (Vector Char _)) := lines.map (fun s =>
+        let s := s.toList.toArray
+      if checkw: s.size = width then
+        some (Vector.mk s checkw)
+      else
+        none
+    )
+    map.allSome.map (fun as =>
+      let as := as.toArray
+      let height := as.size
+      { width, height, map := Vector.mk as rfl }
+    )
+
+def main (args: List String) : IO Unit := do
+  let file ← IO.FS.readFile "input.txt"
+  match parseInput file with
+  | none => IO.println "Invalid input"
+  | some { width, height, map } =>
+    if args[0]? = "2" then
+      let result := "sorry"
+      IO.println s!"Result: {result}"
+    else
+      if nz: 0 < height ∧ 0 < width then
+        let wrk := Worker.make nz.left nz.right
+        let result := (Worker.prices (wrk.work (flattenMap map))).sum
+        IO.println s!"Result: {result}"
+      else
+      IO.println "empty map"
+
+/-
+part 2 idea:
+postprocessing step
+iter (frist linewise, then column-wise):
+  pair of tiles, pair of tiles right above them
+  for each pair:
+    if same region (after resolving) AND different region than all other tiles:
+      perimeter -= 1
+-/
