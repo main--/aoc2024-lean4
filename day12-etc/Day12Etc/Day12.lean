@@ -48,6 +48,18 @@ def Worker.resolveRegion (w: Worker h w) (reg: Fin w.groups.size): (Region × (F
       exact w.mergedGroupsValid reg j cond
     )
     w.resolveRegion ⟨j, Nat.lt_trans ltreg reg.isLt⟩
+theorem Worker.resolvedRegionIsNotMerged (wrk: Worker h w) (rin: Fin wrk.groups.size): ∀ m, ¬wrk.groups[(wrk.resolveRegion rin).snd] = RegionEntry.merged m := by
+  intro m
+  rw [Worker.resolveRegion]
+  split
+  case h_1 r heq => simp [heq]
+  case h_2 j heq =>
+    simp
+    have ltreg: j < rin := (by
+      rw [←Option.some_inj, ←Array.getElem?_eq_getElem] at heq
+      exact wrk.mergedGroupsValid rin j heq
+    )
+    apply wrk.resolvedRegionIsNotMerged ⟨j, Nat.lt_trans ltreg rin.isLt⟩ m
 
 def calc_prices (groups: Array RegionEntry): List Nat :=
   groups.toList.filterMap (fun re => match re with
@@ -474,82 +486,58 @@ iter (frist linewise, then column-wise):
 -/
 def part2 {h w: Nat} (wrk: { wrk: Worker h w // ↑wrk.iteration = w * h }) :=
   -- horizontally
-  let idxsHorizontal := (List.finRange (h+1)).flatMap (fun x => (List.finRange w).map (x, ·))
-  let groups := idxsHorizontal.foldl (fun groups c =>
-    let (cx, cy) := c
-    if ynz: cy.val = 0 then
-      -- do nothing on the first column (we need a pair of tiles to work with)
-      groups
-    else
-      let lowerPair := if xlt: cx.val < h then
-        [some (cx.castLT xlt, fin_sub1 cy), some (cx.castLT xlt, cy)]
-      else
-        [none, none]
-      let upperPair := if xnz: cx ≠ 0 then
-        [some (cx.pred xnz, fin_sub1 cy), some (cx.pred xnz, cy)]
-      else
-        [none, none]
-      let pairs := [lowerPair, upperPair]
-      -- resolve into region IDs
-      let pairs := pairs.map (·.map (·.map (fun pos =>
-        let pos := FinEnum.equiv pos
-        let ra := wrk.val.regionAssignments.get (pos.cast (by
-          simp [FinEnum.card, wrk.prop]
-          exact Nat.mul_comm h w
-        ))
-        (wrk.val.resolveRegion ⟨ra, wrk.val.raValid ra (Array.getElem_mem _)⟩).snd
-      )))
-      -- iterate over [(pair1, pair2), (pair2, pair1)] to reduce code duplication
-      (pairs.zip pairs.reverse).foldl (fun groups (pair, otherPair) =>
-        match pair with
-        | [some r1, some r2] => if r1 = r2 && !otherPair.contains (some r1) then
-            groups.modify r1 (fun reg => match reg with
-            | RegionEntry.region reg => RegionEntry.region { reg with perimeter := reg.perimeter - 1 }
-            | _ => reg
-            )
-          else groups
-        | _ => groups
-      ) groups
+  let horizontalPairs := iterPairs h w
+  let verticalPairs := (iterPairs w h).map (·.map (·.map (·.map Prod.swap))) -- like horizontal but transposed
+  let groups := (horizontalPairs ++ verticalPairs).foldl (fun groups pairs =>
+    -- resolve into region IDs
+    let pairs := pairs.map (·.map (·.map (fun pos =>
+      let pos := FinEnum.equiv pos
+      let ra := wrk.val.regionAssignments.get (pos.cast (by
+        simp [FinEnum.card, wrk.prop]
+        exact Nat.mul_comm h w
+      ))
+      (wrk.val.resolveRegion ⟨ra, wrk.val.raValid ra (Array.getElem_mem _)⟩).snd
+    )))
+    -- iterate over [(lowerPair, upperPair), (upperPair, lowerPair)]
+    -- when pair=lowerPair, we try to merge north-facing edges of the lower region
+    -- when pair=upperPair, we try to merge south-facing edges of the upper region
+    -- same for the verticalPairs, but transposed
+    (pairs.zip pairs.reverse).foldl (fun groups (pair, otherPair) =>
+      match pair with
+      | [some r1, some r2] => if r1 = r2 && !otherPair.contains (some r1) then
+          groups.modify r1 (fun reg => match reg with
+          | RegionEntry.region reg => RegionEntry.region { reg with perimeter := reg.perimeter - 1 }
+          | RegionEntry.merged j => reg -- technically unreachable
+          )
+        else groups
+      | _ => groups
+    ) groups
   ) wrk.val.groups
-  -- vertically (this is copy-pasted, probably there is a good way to not duplicate the code)
-  let idxsVertical := (List.finRange (w+1)).flatMap (fun y => (List.finRange h).map (·, y))
-  let groups := idxsVertical.foldl (fun groups c =>
-    let (cx, cy) := c
-    if xnz: cx.val = 0 then
-      -- do nothing on the first row (we need a pair of tiles to work with)
-      groups
-    else
-      let lowerPair := if ylt: cy.val < w then
-        [some (fin_sub1 cx, cy.castLT ylt), some (cx, cy.castLT ylt)]
-      else
-        [none, none]
-      let upperPair := if ynz: cy ≠ 0 then
-        [some (fin_sub1 cx, cy.pred ynz), some (cx, cy.pred ynz)]
-      else
-        [none, none]
-      let pairs := [lowerPair, upperPair]
-      -- resolve into region IDs
-      let pairs := pairs.map (·.map (·.map (fun pos =>
-        let pos := FinEnum.equiv pos
-        let ra := wrk.val.regionAssignments.get (pos.cast (by
-          simp [FinEnum.card, wrk.prop]
-          exact Nat.mul_comm h w
-        ))
-        (wrk.val.resolveRegion ⟨ra, wrk.val.raValid ra (Array.getElem_mem _)⟩).snd
-      )))
-      -- iterate over [(pair1, pair2), (pair2, pair1)] to reduce code duplication
-      (pairs.zip pairs.reverse).foldl (fun groups (pair, otherPair) =>
-        match pair with
-        | [some r1, some r2] => if r1 = r2 && !otherPair.contains (some r1) then
-            groups.modify r1 (fun reg => match reg with
-            | RegionEntry.region reg => RegionEntry.region { reg with perimeter := reg.perimeter - 1 }
-            | _ => reg
-            )
-          else groups
-        | _ => groups
-      ) groups
-  ) groups
+
   (calc_prices groups).sum
+where
+  -- for each tile in a h-by-w grid, produce a 2-element list [lowerPair, upperPair]
+  -- where each pair consists of two horizontally adjancet tiles, and then the two pairs are vertically
+  -- adjacent to each other. the length is h+1, i.e., the returned list starts with [lower=none, upper=twoFirstRowTiles]
+  -- and ends with [lower=twoLastRowTiles, upper=none]
+  iterPairs (h w: Nat) :=
+    ((List.finRange (h+1)).flatMap (fun x => (List.finRange w).map (x, ·))).filterMap (fun c =>
+      let (cx, cy) := c
+      if ynz: cy.val = 0 then
+        -- do nothing on the first column (we need a pair of tiles to work with)
+        none
+      else
+        let lowerPair := if xlt: cx.val < h then
+          [some (cx.castLT xlt, fin_sub1 cy), some (cx.castLT xlt, cy)]
+        else
+          [none, none]
+        let upperPair := if xnz: cx ≠ 0 then
+          [some (cx.pred xnz, fin_sub1 cy), some (cx.pred xnz, cy)]
+        else
+          [none, none]
+        some [lowerPair, upperPair]
+    )
+
 
 #guard 80 = (part2 ⟨(worker44.work (flattenMap exampleData)), Worker.done_after_work _⟩)
 
