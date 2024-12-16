@@ -49,11 +49,14 @@ def Worker.resolveRegion (w: Worker h w) (reg: Fin w.groups.size): (Region × (F
     )
     w.resolveRegion ⟨j, Nat.lt_trans ltreg reg.isLt⟩
 
-def Worker.prices (groups: Array RegionEntry): List Nat :=
+def calc_prices (groups: Array RegionEntry): List Nat :=
   groups.toList.filterMap (fun re => match re with
   | RegionEntry.merged _ => none
   | RegionEntry.region r => some (r.area * r.perimeter)
   )
+
+def Worker.prices (wrk: Worker w h): List Nat :=
+  calc_prices wrk.groups
 
 def exampleData: Vector (Vector Char 4) 4 := #v[
   #v['A', 'A', 'A', 'A'],
@@ -237,9 +240,7 @@ def Worker.run_iteration {h w: Nat} (wrk: Worker h w) (map: Vector Char (w * h))
   | [pred] =>
     -- add the current tile to the existing region, only one side touches (for now)
     let existingRegion := wrk.regionAssignments.get pred
-    let (region, regid) := wrk.resolveRegion ⟨existingRegion, wrk.raValid existingRegion (
-      Array.getElem_mem _
-    )⟩
+    let (region, regid) := wrk.resolveRegion ⟨existingRegion, wrk.raValid existingRegion (Array.getElem_mem _)⟩
     {
       iteration := next_iter,
       regionAssignments := wrk.regionAssignments.push existingRegion
@@ -402,17 +403,33 @@ def Worker.run_iteration {h w: Nat} (wrk: Worker h w) (map: Vector Char (w * h))
 theorem Worker.iter_inc {w h: Nat} {map: Vector Char (w*h)} (wrk: Worker h w) (notdone: ↑wrk.iteration < (w * h)): (wrk.run_iteration map notdone).iteration.val = wrk.iteration.val + 1 := by
   simp [Worker.run_iteration]
   repeat split <;> repeat simp
-def Worker.work {h w: Nat} (wrk: Worker h w) (map: Vector Char (w * h)) :=
+
+def Worker.work {h w: Nat} (wrk: Worker h w) (map: Vector Char (w * h)): Worker h w :=
   if notdone: ↑wrk.iteration < (w * h) then
     (wrk.run_iteration map notdone).work map
   else
-    wrk.groups
+    wrk
 termination_by (w * h) - wrk.iteration
 decreasing_by
   rw [wrk.iter_inc]
   refine Nat.sub_lt_sub_left notdone ?_
   simp
 
+theorem Worker.done_after_work (wrk: Worker h w): ↑(wrk.work map).iteration = w * h := by
+  rw [Worker.work]
+  split
+  case isTrue notdone =>
+    have vrec: (w * h) - (wrk.run_iteration map notdone).iteration < w * h - ↑wrk.iteration := by
+      rw [wrk.iter_inc]
+      refine Nat.sub_lt_sub_left notdone ?_
+      simp
+    exact Worker.done_after_work _
+  case isFalse hyp =>
+    apply Nat.ge_of_not_lt at hyp
+    have le := Nat.le_of_lt_add_one wrk.iteration.isLt
+    have asd := GE.ge.le hyp
+    exact Nat.eq_iff_le_and_ge.mpr (And.intro le (GE.ge.le hyp))
+termination_by (w * h) - wrk.iteration
 
 def worker44: Worker 4 4 := Worker.make (by simp) (by simp)
 
@@ -443,21 +460,8 @@ def parseInput (s: String): Option ParsedMap :=
       { width, height, map := Vector.mk as rfl }
     )
 
-def main (args: List String) : IO Unit := do
-  let file ← IO.FS.readFile "input.txt"
-  match parseInput file with
-  | none => IO.println "Invalid input"
-  | some { width, height, map } =>
-    if args[0]? = "2" then
-      let result := "sorry"
-      IO.println s!"Result: {result}"
-    else
-      if nz: 0 < height ∧ 0 < width then
-        let wrk := Worker.make nz.left nz.right
-        let result := (Worker.prices (wrk.work (flattenMap map))).sum
-        IO.println s!"Result: {result}"
-      else
-      IO.println "empty map"
+theorem sub_one_still_lt (h: a < b): a - 1 < b := Nat.lt_of_le_of_lt (Nat.sub_le a 1) h
+def fin_sub1 (f: Fin n): Fin n := ⟨f.val - 1, sub_one_still_lt f.isLt⟩
 
 /-
 part 2 idea:
@@ -466,5 +470,102 @@ iter (frist linewise, then column-wise):
   pair of tiles, pair of tiles right above them
   for each pair:
     if same region (after resolving) AND different region than all other tiles:
-      perimeter -= 1
+      that_region.perimeter -= 1
 -/
+def part2 {h w: Nat} (wrk: { wrk: Worker h w // ↑wrk.iteration = w * h }) :=
+  -- horizontally
+  let idxsHorizontal := (List.finRange (h+1)).flatMap (fun x => (List.finRange w).map (x, ·))
+  let groups := idxsHorizontal.foldl (fun groups c =>
+    let (cx, cy) := c
+    if ynz: cy.val = 0 then
+      -- do nothing on the first column (we need a pair of tiles to work with)
+      groups
+    else
+      let lowerPair := if xlt: cx.val < h then
+        [some (cx.castLT xlt, fin_sub1 cy), some (cx.castLT xlt, cy)]
+      else
+        [none, none]
+      let upperPair := if xnz: cx ≠ 0 then
+        [some (cx.pred xnz, fin_sub1 cy), some (cx.pred xnz, cy)]
+      else
+        [none, none]
+      let pairs := [lowerPair, upperPair]
+      -- resolve into region IDs
+      let pairs := pairs.map (·.map (·.map (fun pos =>
+        let pos := FinEnum.equiv pos
+        let ra := wrk.val.regionAssignments.get (pos.cast (by
+          simp [FinEnum.card, wrk.prop]
+          exact Nat.mul_comm h w
+        ))
+        (wrk.val.resolveRegion ⟨ra, wrk.val.raValid ra (Array.getElem_mem _)⟩).snd
+      )))
+      -- iterate over [(pair1, pair2), (pair2, pair1)] to reduce code duplication
+      (pairs.zip pairs.reverse).foldl (fun groups (pair, otherPair) =>
+        match pair with
+        | [some r1, some r2] => if r1 = r2 && !otherPair.contains (some r1) then
+            groups.modify r1 (fun reg => match reg with
+            | RegionEntry.region reg => RegionEntry.region { reg with perimeter := reg.perimeter - 1 }
+            | _ => reg
+            )
+          else groups
+        | _ => groups
+      ) groups
+  ) wrk.val.groups
+  -- vertically (this is copy-pasted, probably there is a good way to not duplicate the code)
+  let idxsVertical := (List.finRange (w+1)).flatMap (fun y => (List.finRange h).map (·, y))
+  let groups := idxsVertical.foldl (fun groups c =>
+    let (cx, cy) := c
+    if xnz: cx.val = 0 then
+      -- do nothing on the first row (we need a pair of tiles to work with)
+      groups
+    else
+      let lowerPair := if ylt: cy.val < w then
+        [some (fin_sub1 cx, cy.castLT ylt), some (cx, cy.castLT ylt)]
+      else
+        [none, none]
+      let upperPair := if ynz: cy ≠ 0 then
+        [some (fin_sub1 cx, cy.pred ynz), some (cx, cy.pred ynz)]
+      else
+        [none, none]
+      let pairs := [lowerPair, upperPair]
+      -- resolve into region IDs
+      let pairs := pairs.map (·.map (·.map (fun pos =>
+        let pos := FinEnum.equiv pos
+        let ra := wrk.val.regionAssignments.get (pos.cast (by
+          simp [FinEnum.card, wrk.prop]
+          exact Nat.mul_comm h w
+        ))
+        (wrk.val.resolveRegion ⟨ra, wrk.val.raValid ra (Array.getElem_mem _)⟩).snd
+      )))
+      -- iterate over [(pair1, pair2), (pair2, pair1)] to reduce code duplication
+      (pairs.zip pairs.reverse).foldl (fun groups (pair, otherPair) =>
+        match pair with
+        | [some r1, some r2] => if r1 = r2 && !otherPair.contains (some r1) then
+            groups.modify r1 (fun reg => match reg with
+            | RegionEntry.region reg => RegionEntry.region { reg with perimeter := reg.perimeter - 1 }
+            | _ => reg
+            )
+          else groups
+        | _ => groups
+      ) groups
+  ) groups
+  (calc_prices groups).sum
+
+#guard 80 = (part2 ⟨(worker44.work (flattenMap exampleData)), Worker.done_after_work _⟩)
+
+def main (p2: Bool) (_args: List String) : IO Unit := do
+  let file ← IO.FS.readFile "input.txt"
+  match parseInput file with
+  | none => IO.println "Invalid input"
+  | some { width, height, map } =>
+    if nz: 0 < height ∧ 0 < width then
+      let wrk := Worker.make nz.left nz.right
+      let wrk := wrk.work (flattenMap map)
+      if p2 then
+        let result := part2 ⟨wrk, Worker.done_after_work _⟩
+        IO.println s!"Result: {result}"
+      else
+        let result := wrk.prices.sum
+        IO.println s!"Result: {result}"
+    else
+    IO.println "empty map"
