@@ -1,4 +1,5 @@
 import Day12Etc.ArrayMap
+import Day12Etc.Theorems
 
 namespace Day12
 
@@ -472,7 +473,6 @@ def parseInput (s: String): Option ParsedMap :=
       { width, height, map := Vector.mk as rfl }
     )
 
-theorem sub_one_still_lt (h: a < b): a - 1 < b := Nat.lt_of_le_of_lt (Nat.sub_le a 1) h
 def fin_sub1 (f: Fin n): Fin n := ⟨f.val - 1, sub_one_still_lt f.isLt⟩
 
 /-

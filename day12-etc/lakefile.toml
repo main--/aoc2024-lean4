@@ -15,3 +15,4 @@ name = "Day12Etc"
 
 [[lean_exe]]
 name = "Main"
+buildType = "relWithDebInfo"
